@@ -1,2 +1,5 @@
 /NoteTakingAPI/.vs
 /NoteTakingAPI/WebApplication1/obj
+/NoteTakingAPI/WebApplication1/bin
+/NoteTakingAPI/NoteTakingAPI.Tests/obj
+/NoteTakingAPI/NoteTakingAPI.Tests/bin

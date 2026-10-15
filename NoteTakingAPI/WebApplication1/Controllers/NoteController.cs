@@ -1,83 +1,112 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using NoteTakingAPI.Interfaces;
+using NoteTakingAPI.Models;
 
 namespace NoteTakingAPI.Controllers
 {
-    public class NoteController : Controller
+    [ApiController]
+    [Route("note")]
+    public class NoteController : ControllerBase
     {
-        // GET: NoteController
-        public ActionResult Index()
+        private readonly ILogger<NoteController> _logger;
+        private readonly INoteRepository _databaseRepository;
+        public NoteController(ILogger<NoteController> logger, INoteRepository databaseRepository)
         {
-            return View();
+            _logger = logger;
+            _databaseRepository = databaseRepository;
         }
 
-        // GET: NoteController/Details/5
-        public ActionResult Details(int id)
+        [HttpGet]
+        public ActionResult<NoteModel> GetNoteByTitle([FromBody] string title)
         {
-            return View();
+            HttpContext.Request.Headers.TryGetValue("OwnerId", out var ownerIdHeader);
+            int ownerId = int.TryParse(ownerIdHeader, out var parsedOwnerId) ? parsedOwnerId : 0;
+            if (parsedOwnerId == 0)
+            {
+                _logger.LogWarning("OwnerId header is missing or invalid.");
+                return BadRequest("OwnerId header is required and must be a valid integer.");
+            }
+            NoteModel? note = _databaseRepository.GetNoteByTitle(ownerId, title).Result;
+            if (note == null) {
+                _logger.LogWarning($"Note with Title: {title} not found.");
+                return NotFound($"Note with Title: {title} not found.");
+            }
+            return Ok(note);
         }
 
-        // GET: NoteController/Create
-        public ActionResult Create()
+        [HttpGet("all")]
+        public ActionResult<List<NoteModel>> GetAllNotesByOwner()
         {
-            return View();
+            HttpContext.Request.Headers.TryGetValue("OwnerId", out var ownerIdHeader);
+            int ownerId = int.TryParse(ownerIdHeader, out var parsedOwnerId) ? parsedOwnerId : 0;
+            if (parsedOwnerId == 0)
+            {
+                _logger.LogWarning("OwnerId header is missing or invalid.");
+                return BadRequest("OwnerId header is required and must be a valid integer.");
+            }
+            _logger.LogInformation($"Getting all notes for owner with ID: {ownerId}");
+            List<NoteModel> notes = _databaseRepository.GetAllNotesByOwner(ownerId).Result;
+            return Ok(notes);
         }
 
-        // POST: NoteController/Create
+        [HttpGet("team")]
+        public ActionResult<List<NoteModel>> GetAllNotesByTeam()
+        {
+            HttpContext.Request.Headers.TryGetValue("TeamName", out var teamNameHeader);
+            if (string.IsNullOrEmpty(teamNameHeader))
+            {
+                // If the team name is missing, return a bad request. 
+                // It is possible for notes to be created without a team name,
+                // but we don't want to return all notes with an empty team name, because that is not a valid team.
+                _logger.LogWarning("TeamName header is missing.");
+                return BadRequest("TeamName is missing from the header.");
+            }
+            _logger.LogInformation($"Getting all notes for team: {teamNameHeader}");
+            return Ok(_databaseRepository.GetAllNotesByTeam(teamNameHeader).Result);
+        }
+
         [HttpPost]
-        [ValidateAntiForgeryToken]
-        public ActionResult Create(IFormCollection collection)
+        public ActionResult CreateOrUpdateNote([FromBody] CreateNoteRequest request)
         {
-            try
+            _logger.LogInformation($"Creating or updating note with ID: {request.Title}");
+            HttpContext.Request.Headers.TryGetValue("OwnerId", out var ownerIdHeader);
+            int ownerId = int.TryParse(ownerIdHeader, out var parsedOwnerId) ? parsedOwnerId : 0;
+            if (ownerId == 0)
             {
-                return RedirectToAction(nameof(Index));
+                _logger.LogWarning("OwnerId header is missing or invalid.");
+                return BadRequest("OwnerId header is required and must be a valid integer.");
             }
-            catch
+            if (!HttpContext.Request.Headers.TryGetValue("TeamName", out var teamNameHeader))
             {
-                return View();
+                teamNameHeader = string.Empty;
             }
+
+            NoteModel noteModel = new NoteModel
+            {
+                Title = request.Title,
+                Content = request.Content,
+                OwnerId = ownerId,
+                TeamName = teamNameHeader
+            };
+
+            _databaseRepository.CreateOrUpdateNote(noteModel);
+            return Created();
         }
 
-        // GET: NoteController/Edit/5
-        public ActionResult Edit(int id)
+        [HttpDelete]
+        public ActionResult DeleteNote([FromBody] string title)
         {
-            return View();
-        }
-
-        // POST: NoteController/Edit/5
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public ActionResult Edit(int id, IFormCollection collection)
-        {
-            try
+            HttpContext.Request.Headers.TryGetValue("OwnerId", out var ownerIdHeader);
+            int ownerId = int.TryParse(ownerIdHeader, out var parsedOwnerId) ? parsedOwnerId : 0;
+            if (parsedOwnerId == 0)
             {
-                return RedirectToAction(nameof(Index));
+                _logger.LogWarning("OwnerId header is missing or invalid.");
+                return BadRequest("OwnerId header is required and must be a valid integer.");
             }
-            catch
-            {
-                return View();
-            }
-        }
-
-        // GET: NoteController/Delete/5
-        public ActionResult Delete(int id)
-        {
-            return View();
-        }
-
-        // POST: NoteController/Delete/5
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public ActionResult Delete(int id, IFormCollection collection)
-        {
-            try
-            {
-                return RedirectToAction(nameof(Index));
-            }
-            catch
-            {
-                return View();
-            }
+            _logger.LogInformation($"Deleting note with ID: {title} for owner with ID: {ownerId}");
+            _databaseRepository.DeleteNote(ownerId, title);
+            return NoContent();
         }
     }
 }
